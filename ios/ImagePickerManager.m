@@ -14,6 +14,17 @@
 
 @end
 
+@interface ImagePickerManager (UIImagePickerControllerDelegate) <UINavigationControllerDelegate, UIImagePickerControllerDelegate>
+@end
+
+@interface ImagePickerManager (UIAdaptivePresentationControllerDelegate) <UIAdaptivePresentationControllerDelegate>
+@end
+
+#if __has_include(<PhotosUI/PHPicker.h>)
+@interface ImagePickerManager (PHPickerViewControllerDelegate) <PHPickerViewControllerDelegate>
+@end
+#endif
+
 @implementation ImagePickerManager
 
 NSString *errCameraUnavailable = @"camera_unavailable";
@@ -50,28 +61,46 @@ RCT_EXPORT_METHOD(launchImageLibrary:(NSDictionary *)options callback:(RCTRespon
     
     self.options = options;
 
+#if __has_include(<PhotosUI/PHPicker.h>)
     if (@available(iOS 14, *)) {
         if (target == library) {
             PHPickerConfiguration *configuration = [ImagePickerUtils makeConfigurationFromOptions:options target:target];
             PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:configuration];
             picker.delegate = self;
+            picker.presentationController.delegate = self;
 
-            [self showPickerViewController:picker];
+            if([self.options[@"includeExtra"] boolValue]) {
+                
+                [self checkPhotosPermissions:^(BOOL granted) {
+                    if (!granted) {
+                        self.callback(@[@{@"errorCode": errPermission}]);
+                        return;
+                    }
+                    [self showPickerViewController:picker];
+                }];
+            } else {
+                [self showPickerViewController:picker];
+            }
+            
             return;
         }
     }
-
+#endif
     UIImagePickerController *picker = [[UIImagePickerController alloc] init];
     [ImagePickerUtils setupPickerFromOptions:picker options:self.options target:target];
     picker.delegate = self;
-
-    [self checkPermission:^(BOOL granted) {
-        if (!granted) {
-            self.callback(@[@{@"errorCode": errPermission}]);
-            return;
-        }
-        [self showPickerViewController:picker];
-    }];
+    
+    if([self.options[@"includeExtra"] boolValue]) {
+        [self checkPhotosPermissions:^(BOOL granted) {
+            if (!granted) {
+                self.callback(@[@{@"errorCode": errPermission}]);
+                return;
+            }
+            [self showPickerViewController:picker];
+        }];
+    } else {
+      [self showPickerViewController:picker];
+    }
 }
 
 - (void) showPickerViewController:(UIViewController *)picker
@@ -82,68 +111,15 @@ RCT_EXPORT_METHOD(launchImageLibrary:(NSDictionary *)options callback:(RCTRespon
     });
 }
 
-- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary<NSString *,id> *)info
-{
-    dispatch_block_t dismissCompletionBlock = ^{
-        if ([info[UIImagePickerControllerMediaType] isEqualToString:(NSString *) kUTTypeImage]) {
-            [self onImageObtained:[ImagePickerManager getUIImageFromInfo:info]
-                             data:[NSData dataWithContentsOfURL:[ImagePickerManager getNSURLFromInfo:info]]];
-        }
-        else {
-            [self onVideoObtained:info[UIImagePickerControllerMediaURL]];
-        }
-    };
+#pragma mark - Helpers
 
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [picker dismissViewControllerAnimated:YES completion:dismissCompletionBlock];
-    });
-}
-
-- (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker
-{
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [picker dismissViewControllerAnimated:YES completion:^{
-            self.callback(@[@{@"didCancel": @YES}]);
-        }];
-    });
-}
-
-- (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results API_AVAILABLE(ios(14)){
-    [picker dismissViewControllerAnimated:YES completion:nil];
-
-    if (results.count == 0) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self.callback(@[@{@"didCancel": @YES}]);
-        });
-        return;
-    }
-
-    for (PHPickerResult *result in results) {
-        NSItemProvider *provider = result.itemProvider;
-
-        if ([provider hasItemConformingToTypeIdentifier:(NSString *)kUTTypeImage]) {
-            [provider loadDataRepresentationForTypeIdentifier:(NSString *)kUTTypeImage
-                      completionHandler:^(NSData *data, NSError * _Nullable error) {
-                [self onImageObtained:[UIImage imageWithData:data] data:data];
-            }];
-        }
-        else if ([provider hasItemConformingToTypeIdentifier:(NSString *)kUTTypeMovie]) {
-            [provider loadFileRepresentationForTypeIdentifier:(NSString *)kUTTypeMovie
-                                            completionHandler:^(NSURL * _Nullable url, NSError * _Nullable error) {
-                [self onVideoObtained:url];
-            }];
-        }
-    }
-}
-
-- (void)onImageObtained:(UIImage*)image data:(NSData*)data
-{
+-(NSMutableDictionary *)mapImageToAsset:(UIImage *)image data:(NSData *)data phAsset:(PHAsset * _Nullable)phAsset {
+    NSString *fileType = [ImagePickerUtils getFileType:data];
+    
     if ((target == camera) && [self.options[@"saveToPhotos"] boolValue]) {
         UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil);
     }
-
-    NSString *fileType = [ImagePickerUtils getFileType:data];
-
+    
     if (![fileType isEqualToString:@"gif"]) {
         image = [ImagePickerUtils resizeImage:image
                                      maxWidth:[self.options[@"maxWidth"] floatValue]
@@ -152,86 +128,96 @@ RCT_EXPORT_METHOD(launchImageLibrary:(NSDictionary *)options callback:(RCTRespon
 
     if ([fileType isEqualToString:@"jpg"]) {
         data = UIImageJPEGRepresentation(image, [self.options[@"quality"] floatValue]);
-    }
-    else if ([fileType isEqualToString:@"png"]) {
+    } else if ([fileType isEqualToString:@"png"]) {
         data = UIImagePNGRepresentation(image);
     }
-    else {
-        data = data;
-    }
-
-    NSMutableDictionary *response = [[NSMutableDictionary alloc] init];
-    response[@"type"] = [@"image/" stringByAppendingString:fileType];
+    
+    NSMutableDictionary *asset = [[NSMutableDictionary alloc] init];
+    asset[@"type"] = [@"image/" stringByAppendingString:fileType];
 
     NSString *fileName = [self getImageFileName:fileType];
     NSString *path = [[NSTemporaryDirectory() stringByStandardizingPath] stringByAppendingPathComponent:fileName];
     [data writeToFile:path atomically:YES];
 
     if ([self.options[@"includeBase64"] boolValue]) {
-        response[@"base64"] = [data base64EncodedStringWithOptions:0];
+        asset[@"base64"] = [data base64EncodedStringWithOptions:0];
     }
 
     NSURL *fileURL = [NSURL fileURLWithPath:path];
-    response[@"uri"] = [fileURL absoluteString];
+    asset[@"uri"] = [fileURL absoluteString];
 
     NSNumber *fileSizeValue = nil;
     NSError *fileSizeError = nil;
     [fileURL getResourceValue:&fileSizeValue forKey:NSURLFileSizeKey error:&fileSizeError];
     if (fileSizeValue){
-        response[@"fileSize"] = fileSizeValue;
+        asset[@"fileSize"] = fileSizeValue;
     }
 
-    response[@"fileName"] = fileName;
-    response[@"width"] = @(image.size.width);
-    response[@"height"] = @(image.size.height);
-    self.callback(@[response]);
+    asset[@"fileName"] = fileName;
+    asset[@"width"] = @(image.size.width);
+    asset[@"height"] = @(image.size.height);
+    
+    if(phAsset){
+        NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+        [formatter setTimeZone:[NSTimeZone timeZoneWithAbbreviation:@"UTC"]];
+        [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSSZ"];
+        NSString *creationDate = [formatter stringFromDate:phAsset.creationDate];
+        
+        asset[@"timestamp"] = creationDate;
+        asset[@"id"] = phAsset.localIdentifier;
+        // Add more extra data here ...
+    }
+    
+    return asset;
 }
 
-- (void)onVideoObtained:(NSURL *)url
-{
+-(NSMutableDictionary *)mapVideoToAsset:(NSURL *)url phAsset:(PHAsset * _Nullable)phAsset error:(NSError **)error {
     NSString *fileName = [url lastPathComponent];
     NSString *path = [[NSTemporaryDirectory() stringByStandardizingPath] stringByAppendingPathComponent:fileName];
-
     NSURL *videoDestinationURL = [NSURL fileURLWithPath:path];
 
     if ((target == camera) && [self.options[@"saveToPhotos"] boolValue]) {
         UISaveVideoAtPathToSavedPhotosAlbum(url.path, nil, nil, nil);
     }
-
+    
     if (![url.URLByResolvingSymlinksInPath.path isEqualToString:videoDestinationURL.URLByResolvingSymlinksInPath.path]) {
         NSFileManager *fileManager = [NSFileManager defaultManager];
-
+        
         // Delete file if it already exists
         if ([fileManager fileExistsAtPath:videoDestinationURL.path]) {
             [fileManager removeItemAtURL:videoDestinationURL error:nil];
         }
 
         if (url) { // Protect against reported crash
-          NSError *error = nil;
 
           // If we have write access to the source file, move it. Otherwise use copy.
           if ([fileManager isWritableFileAtPath:[url path]]) {
-            [fileManager moveItemAtURL:url toURL:videoDestinationURL error:&error];
+            [fileManager moveItemAtURL:url toURL:videoDestinationURL error:error];
           } else {
-            [fileManager copyItemAtURL:url toURL:videoDestinationURL error:&error];
+            [fileManager copyItemAtURL:url toURL:videoDestinationURL error:error];
           }
 
           if (error) {
-              self.callback(@[@{@"errorCode": errOthers, @"errorMessage":  error.localizedFailureReason}]);
-              return;
+              return nil;
           }
         }
     }
-    
-    NSMutableDictionary *response = [[NSMutableDictionary alloc] init];
-    AVAsset *asset = [AVAsset assetWithURL:videoDestinationURL];
-    response[@"duration"] = @(roundf(CMTimeGetSeconds(asset.duration)));
-    response[@"uri"] = videoDestinationURL.absoluteString;
-    
-    self.callback(@[response]);
-}
 
-#pragma mark - Helpers
+    NSMutableDictionary *asset = [[NSMutableDictionary alloc] init];
+    asset[@"fileName"] = fileName;
+    asset[@"duration"] = [NSNumber numberWithDouble:CMTimeGetSeconds([AVAsset assetWithURL:videoDestinationURL].duration)];
+    asset[@"uri"] = videoDestinationURL.absoluteString;
+    asset[@"type"] = [ImagePickerUtils getFileTypeFromUrl:videoDestinationURL];
+    asset[@"fileSize"] = [ImagePickerUtils getFileSizeFromUrl:videoDestinationURL];
+
+    if (phAsset) {
+      asset[@"id"] = phAsset.localIdentifier;
+      // Add more extra data here ...
+    }
+
+    
+    return asset;
+}
 
 - (void)checkCameraPermissions:(void(^)(BOOL granted))callback
 {
@@ -345,3 +331,133 @@ RCT_EXPORT_METHOD(launchImageLibrary:(NSDictionary *)options callback:(RCTRespon
 }
 
 @end
+
+@implementation ImagePickerManager (UIImagePickerControllerDelegate)
+
+- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary<NSString *,id> *)info
+{
+    dispatch_block_t dismissCompletionBlock = ^{
+        NSMutableArray<NSDictionary *> *assets = [[NSMutableArray alloc] initWithCapacity:1];
+        PHAsset *asset = nil;
+
+        // If include extra, we fetch the PHAsset, this required library permissions
+        if([self.options[@"includeExtra"] boolValue]) {
+          asset = [ImagePickerUtils fetchPHAssetOnIOS13:info];
+        }
+
+        if ([info[UIImagePickerControllerMediaType] isEqualToString:(NSString *) kUTTypeImage]) {
+            UIImage *image = [ImagePickerManager getUIImageFromInfo:info];
+            
+            [assets addObject:[self mapImageToAsset:image data:[NSData dataWithContentsOfURL:[ImagePickerManager getNSURLFromInfo:info]] phAsset:asset]];
+        } else {
+            NSError *error;
+            NSDictionary *videoAsset = [self mapVideoToAsset:info[UIImagePickerControllerMediaURL] phAsset:asset error:&error];
+            if (videoAsset == nil) {
+                self.callback(@[@{@"errorCode": errOthers, @"errorMessage":  error.localizedFailureReason}]);
+                return;
+            }
+            [assets addObject:videoAsset];
+        }
+
+        NSMutableDictionary *response = [[NSMutableDictionary alloc] init];
+        response[@"assets"] = assets;
+        self.callback(@[response]);
+    };
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [picker dismissViewControllerAnimated:YES completion:dismissCompletionBlock];
+    });
+}
+
+- (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [picker dismissViewControllerAnimated:YES completion:^{
+            self.callback(@[@{@"didCancel": @YES}]);
+        }];
+    });
+}
+
+@end
+
+@implementation ImagePickerManager (presentationControllerDidDismiss)
+
+- (void)presentationControllerDidDismiss:(UIPresentationController *)presentationController
+{
+    self.callback(@[@{@"didCancel": @YES}]);
+}
+
+@end
+
+#if __has_include(<PhotosUI/PHPicker.h>)
+@implementation ImagePickerManager (PHPickerViewControllerDelegate)
+
+- (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results API_AVAILABLE(ios(14))
+{
+    [picker dismissViewControllerAnimated:YES completion:nil];
+
+    if (results.count == 0) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.callback(@[@{@"didCancel": @YES}]);
+        });
+        return;
+    }
+
+    dispatch_group_t completionGroup = dispatch_group_create();
+    NSMutableArray<NSDictionary *> *assets = [[NSMutableArray alloc] initWithCapacity:results.count];
+
+    for (PHPickerResult *result in results) {
+        PHAsset *asset = nil;
+        NSItemProvider *provider = result.itemProvider;
+
+        // If include extra, we fetch the PHAsset, this required library permissions
+        if([self.options[@"includeExtra"] boolValue] && result.assetIdentifier != nil) {
+            PHFetchResult* fetchResult = [PHAsset fetchAssetsWithLocalIdentifiers:@[result.assetIdentifier] options:nil];
+            asset = fetchResult.firstObject;
+        }
+        
+        dispatch_group_enter(completionGroup);
+
+        if ([provider canLoadObjectOfClass:[UIImage class]]) {
+            NSString *identifier = provider.registeredTypeIdentifiers.firstObject;
+            if ([identifier isEqualToString:@"com.apple.live-photo-bundle"]) {
+                // Handle live photos
+                identifier = @"public.jpeg";
+            }
+
+            [provider loadFileRepresentationForTypeIdentifier:identifier completionHandler:^(NSURL * _Nullable url, NSError * _Nullable error) {
+                NSData *data = [[NSData alloc] initWithContentsOfURL:url];
+                UIImage *image = [[UIImage alloc] initWithData:data];
+                
+                [assets addObject:[self mapImageToAsset:image data:data phAsset:asset]];
+                dispatch_group_leave(completionGroup);
+            }];
+        } else if ([provider hasItemConformingToTypeIdentifier:(NSString *)kUTTypeMovie]) {
+            [provider loadFileRepresentationForTypeIdentifier:(NSString *)kUTTypeMovie completionHandler:^(NSURL * _Nullable url, NSError * _Nullable error) {
+                [assets addObject:[self mapVideoToAsset:url phAsset:asset error:nil]];
+                dispatch_group_leave(completionGroup);
+            }];
+        } else {
+            // The provider didn't have an item matching photo or video (fails on M1 Mac Simulator)
+            dispatch_group_leave(completionGroup);
+        }
+    }
+
+    dispatch_group_notify(completionGroup, dispatch_get_main_queue(), ^{
+        //  mapVideoToAsset can fail and return nil.
+        for (NSDictionary *asset in assets) {
+            if (nil == asset) {
+                self.callback(@[@{@"errorCode": errOthers}]);
+                return;
+            }
+        }
+
+        NSMutableDictionary *response = [[NSMutableDictionary alloc] init];
+        [response setObject:assets forKey:@"assets"];
+
+        self.callback(@[response]);
+    });
+}
+
+@end
+#endif

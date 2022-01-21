@@ -1,32 +1,42 @@
 export type Callback = (response: ImagePickerResponse) => any;
 
 export interface ImageLibraryOptions {
+  selectionLimit?: number;
   mediaType: MediaType;
   maxWidth?: number;
   maxHeight?: number;
   quality?: PhotoQuality;
   videoQuality?: AndroidVideoOptions | iOSVideoOptions;
   includeBase64?: boolean;
+  includeExtra?: boolean;
 }
 
-export interface CameraOptions extends ImageLibraryOptions {
+export interface CameraOptions
+  extends Omit<ImageLibraryOptions, 'selectionLimit'> {
   durationLimit?: number;
   saveToPhotos?: boolean;
   cameraType?: CameraType;
+}
+
+export interface Asset {
+  base64?: string;
+  uri?: string;
+  width?: number;
+  height?: number;
+  fileSize?: number;
+  type?: string;
+  fileName?: string;
+  duration?: number;
+  bitrate?: number;
+  timestamp?: string;
+  id?: string;
 }
 
 export interface ImagePickerResponse {
   didCancel?: boolean;
   errorCode?: ErrorCode;
   errorMessage?: string;
-  base64?: string;
-  uri?: string;
-  width?: number;
-  height?: number;
-  fileSize?: number;
-  type?: string; //TODO
-  fileName?: string;
-  duration?: number;
+  assets?: Asset[];
 }
 
 export type PhotoQuality =

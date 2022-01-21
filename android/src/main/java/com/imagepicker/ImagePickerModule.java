@@ -16,6 +16,8 @@ import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.module.annotations.ReactModule;
 
 import java.io.File;
+import java.util.Collections;
+import java.util.List;
 
 import static com.imagepicker.Utils.*;
 
@@ -124,18 +126,31 @@ public class ImagePickerModule extends ReactContextBaseJavaModule implements Act
         int requestCode;
         Intent libraryIntent;
         requestCode = REQUEST_LAUNCH_LIBRARY;
-        if (this.options.mediaType.equals(mediaTypeVideo)) {
+
+        boolean isSingleSelect = this.options.selectionLimit == 1;
+        boolean isPhoto = this.options.mediaType.equals(mediaTypePhoto);
+        boolean isVideo = this.options.mediaType.equals(mediaTypeVideo);
+
+        if(isSingleSelect && (isPhoto || isVideo)) {
             libraryIntent = new Intent(Intent.ACTION_PICK);
-            libraryIntent.setType("video/*");
-        } else if (this.options.mediaType.equals(mediaTypePhoto)) {
-            libraryIntent = new Intent(Intent.ACTION_PICK);
-            libraryIntent.setType("image/*");
         } else {
             libraryIntent = new Intent(Intent.ACTION_GET_CONTENT);
-            libraryIntent.setType("*/*");
-            libraryIntent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
             libraryIntent.addCategory(Intent.CATEGORY_OPENABLE);
         }
+
+        if(!isSingleSelect) {
+            libraryIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        }
+
+        if(isPhoto) {
+            libraryIntent.setType("image/*");
+        } else if (isVideo) {
+            libraryIntent.setType("video/*");
+        } else {
+            libraryIntent.setType("*/*");
+            libraryIntent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
+        }
+
         try {
             currentActivity.startActivityForResult(Intent.createChooser(libraryIntent, null), requestCode);
         } catch (ActivityNotFoundException e) {
@@ -144,13 +159,14 @@ public class ImagePickerModule extends ReactContextBaseJavaModule implements Act
         }
     }
 
-    void onImageObtained(Uri uri) {
-        Uri newUri = resizeImage(uri, reactContext, options);
-        callback.invoke(getResponseMap(newUri, options, reactContext));
-    }
-
-    void onVideoObtained(Uri uri) {
-        callback.invoke(getVideoResponseMap(uri, reactContext));
+    void onAssetsObtained(List<Uri> fileUris) {
+        try {
+            callback.invoke(getResponseMap(fileUris, options, reactContext));
+        } catch (RuntimeException exception) {
+            callback.invoke(getErrorMap(errOthers, exception.getMessage()));
+        } finally {
+            callback = null;
+        }
     }
 
     @Override
@@ -174,26 +190,20 @@ public class ImagePickerModule extends ReactContextBaseJavaModule implements Act
                 if (options.saveToPhotos) {
                     saveToPublicDirectory(cameraCaptureURI, reactContext, "photo");
                 }
-                onImageObtained(fileUri);
+
+                onAssetsObtained(Collections.singletonList(fileUri));
                 break;
 
             case REQUEST_LAUNCH_LIBRARY:
-                Uri uri = data.getData();
-                if (isImageType(uri, reactContext)) {
-                    onImageObtained(getAppSpecificStorageUri(uri, reactContext));
-                } else if (isVideoType(uri, reactContext)) {
-                    onVideoObtained(uri);
-                } else {
-                    // This could happen in rarest case when mediaType is mixed and the user selects some other file type like contacts etc, ideally these file options should not be shown by android
-                    callback.invoke(getErrorMap(errOthers, "Unsupported file type"));
-                }
+                onAssetsObtained(collectUrisFromData(data));
                 break;
 
             case REQUEST_LAUNCH_VIDEO_CAPTURE:
                 if (options.saveToPhotos) {
                     saveToPublicDirectory(cameraCaptureURI, reactContext, "video");
                 }
-                onVideoObtained(fileUri);
+
+                onAssetsObtained(Collections.singletonList(fileUri));
                 break;
         }
     }
