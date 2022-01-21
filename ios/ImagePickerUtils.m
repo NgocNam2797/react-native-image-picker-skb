@@ -1,77 +1,49 @@
 #import "ImagePickerUtils.h"
 #import <CoreServices/CoreServices.h>
-#import <PhotosUI/PhotosUI.h>
 
 @implementation ImagePickerUtils
 
-+ (void) setupPickerFromOptions:(UIImagePickerController *)picker options:(NSDictionary *)options target:(RNImagePickerTarget)target
-{
++ (void) setupPickerFromOptions:(UIImagePickerController *)picker options:(NSDictionary *)options target:(RNImagePickerTarget)target {
     if (target == camera) {
         picker.sourceType = UIImagePickerControllerSourceTypeCamera;
-
-        if ([options[@"cameraType"] isEqualToString:@"front"]) {
-            picker.cameraDevice = UIImagePickerControllerCameraDeviceFront;
-        } else {
-            picker.cameraDevice = UIImagePickerControllerCameraDeviceRear;
-        }
-
-        if ([[options objectForKey:@"mediaType"] isEqualToString:@"video"]) {
-
-            if ([[options objectForKey:@"videoQuality"] isEqualToString:@"high"]) {
-                picker.videoQuality = UIImagePickerControllerQualityTypeHigh;
-            }
-            else if ([[options objectForKey:@"videoQuality"] isEqualToString:@"low"]) {
-                picker.videoQuality = UIImagePickerControllerQualityTypeLow;
-            }
-            else {
-                picker.videoQuality = UIImagePickerControllerQualityTypeMedium;
-            }
-
-            if (options[@"durationLimit"] > 0) {
-                picker.videoMaximumDuration = [options[@"durationLimit"] doubleValue];
-            }
-        }
-    } else {
+        picker.cameraDevice = UIImagePickerControllerCameraDeviceRear;
+    }
+    else {
         picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
     }
 
-    if ([options[@"mediaType"] isEqualToString:@"video"]) {
-        picker.mediaTypes = @[(NSString *)kUTTypeMovie];
-    } else if ([options[@"mediaType"] isEqualToString:@"photo"]) {
-        picker.mediaTypes = @[(NSString *)kUTTypeImage];
-    } else if ((target == library) && ([options[@"mediaType"] isEqualToString:@"mixed"])) {
-        picker.mediaTypes = @[(NSString *)kUTTypeImage, (NSString *)kUTTypeMovie];
-    }
+    if ([[options objectForKey:@"mediaType"] isEqualToString:@"video"]) {
 
+        if ([[options objectForKey:@"videoQuality"] isEqualToString:@"high"]) {
+            picker.videoQuality = UIImagePickerControllerQualityTypeHigh;
+        }
+        else if ([[options objectForKey:@"videoQuality"] isEqualToString:@"low"]) {
+            picker.videoQuality = UIImagePickerControllerQualityTypeLow;
+        }
+        else {
+            picker.videoQuality = UIImagePickerControllerQualityTypeMedium;
+        }
+        
+        if (options[@"durationLimit"] > 0) {
+            picker.videoMaximumDuration = [options[@"durationLimit"] doubleValue];
+        }
+
+        picker.mediaTypes = @[(NSString *)kUTTypeMovie];
+    } else {
+        picker.mediaTypes = @[(NSString *)kUTTypeImage];
+    }
+    
     picker.modalPresentationStyle = UIModalPresentationCurrentContext;
 }
 
-+ (PHPickerConfiguration *)makeConfigurationFromOptions:(NSDictionary *)options target:(RNImagePickerTarget)target API_AVAILABLE(ios(14))
-{
-    PHPickerConfiguration *configuration = [[PHPickerConfiguration alloc] init];
-    configuration.preferredAssetRepresentationMode = PHPickerConfigurationAssetRepresentationModeCurrent;
-
-    if ([options[@"mediaType"] isEqualToString:@"video"]) {
-        configuration.filter = [PHPickerFilter videosFilter];
-    } else if ([options[@"mediaType"] isEqualToString:@"photo"]) {
-        configuration.filter = [PHPickerFilter imagesFilter];
-    } else if ((target == library) && ([options[@"mediaType"] isEqualToString:@"mixed"])) {
-        configuration.filter = [PHPickerFilter anyFilterMatchingSubfilters: @[PHPickerFilter.imagesFilter, PHPickerFilter.videosFilter]];
-    }
-
-    return configuration;
-}
-
-+ (BOOL) isSimulator
-{
++ (BOOL) isSimulator {
     #if TARGET_OS_SIMULATOR
         return YES;
     #endif
     return NO;
 }
 
-+ (NSString*) getFileType:(NSData *)imageData
-{
++ (NSString*) getFileType:(NSData *)imageData {
     const uint8_t firstByteJpg = 0xFF;
     const uint8_t firstBytePng = 0x89;
     const uint8_t firstByteGif = 0x47;
@@ -85,9 +57,8 @@
         return @"png";
       case firstByteGif:
         return @"gif";
-      default:
-        return @"jpg";
     }
+    return @"jpg";
 }
 
 + (UIImage*)resizeImage:(UIImage*)image maxWidth:(float)maxWidth maxHeight:(float)maxHeight
