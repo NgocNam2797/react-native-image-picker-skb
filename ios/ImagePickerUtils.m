@@ -6,30 +6,30 @@
 
 + (void) setupPickerFromOptions:(UIImagePickerController *)picker options:(NSDictionary *)options target:(RNImagePickerTarget)target
 {
-    if ([[options objectForKey:@"mediaType"] isEqualToString:@"video"]) {
-
-        if ([[options objectForKey:@"videoQuality"] isEqualToString:@"high"]) {
-            picker.videoQuality = UIImagePickerControllerQualityTypeHigh;
-        }
-        else if ([[options objectForKey:@"videoQuality"] isEqualToString:@"low"]) {
-            picker.videoQuality = UIImagePickerControllerQualityTypeLow;
-        }
-        else {
-            picker.videoQuality = UIImagePickerControllerQualityTypeMedium;
-        }
-    }
-    
     if (target == camera) {
         picker.sourceType = UIImagePickerControllerSourceTypeCamera;
-
-        if (options[@"durationLimit"] > 0) {
-            picker.videoMaximumDuration = [options[@"durationLimit"] doubleValue];
-        }
 
         if ([options[@"cameraType"] isEqualToString:@"front"]) {
             picker.cameraDevice = UIImagePickerControllerCameraDeviceFront;
         } else {
             picker.cameraDevice = UIImagePickerControllerCameraDeviceRear;
+        }
+
+        if ([[options objectForKey:@"mediaType"] isEqualToString:@"video"]) {
+
+            if ([[options objectForKey:@"videoQuality"] isEqualToString:@"high"]) {
+                picker.videoQuality = UIImagePickerControllerQualityTypeHigh;
+            }
+            else if ([[options objectForKey:@"videoQuality"] isEqualToString:@"low"]) {
+                picker.videoQuality = UIImagePickerControllerQualityTypeLow;
+            }
+            else {
+                picker.videoQuality = UIImagePickerControllerQualityTypeMedium;
+            }
+
+            if (options[@"durationLimit"] > 0) {
+                picker.videoMaximumDuration = [options[@"durationLimit"] doubleValue];
+            }
         }
     } else {
         picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
@@ -48,18 +48,8 @@
 
 + (PHPickerConfiguration *)makeConfigurationFromOptions:(NSDictionary *)options target:(RNImagePickerTarget)target API_AVAILABLE(ios(14))
 {
-#if __has_include(<PhotosUI/PHPicker.h>)
-    PHPickerConfiguration *configuration;
-    
-    if(options[@"includeExtra"]) {
-        PHPhotoLibrary *photoLibrary = [PHPhotoLibrary sharedPhotoLibrary];
-        configuration = [[PHPickerConfiguration alloc] initWithPhotoLibrary:photoLibrary];
-    } else {
-        configuration = [[PHPickerConfiguration alloc] init];
-    }
-    
+    PHPickerConfiguration *configuration = [[PHPickerConfiguration alloc] init];
     configuration.preferredAssetRepresentationMode = PHPickerConfigurationAssetRepresentationModeCurrent;
-    configuration.selectionLimit = [options[@"selectionLimit"] integerValue];
 
     if ([options[@"mediaType"] isEqualToString:@"video"]) {
         configuration.filter = [PHPickerFilter videosFilter];
@@ -68,12 +58,9 @@
     } else if ((target == library) && ([options[@"mediaType"] isEqualToString:@"mixed"])) {
         configuration.filter = [PHPickerFilter anyFilterMatchingSubfilters: @[PHPickerFilter.imagesFilter, PHPickerFilter.videosFilter]];
     }
-    return configuration;
-#else
-    return nil;
-#endif
-}
 
+    return configuration;
+}
 
 + (BOOL) isSimulator
 {
@@ -101,27 +88,6 @@
       default:
         return @"jpg";
     }
-}
-
-+ (NSString *) getFileTypeFromUrl:(NSURL *)url {
-    CFStringRef fileExtension = (__bridge CFStringRef)[url pathExtension];
-    CFStringRef UTI = UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension, fileExtension, NULL);
-    CFStringRef MIMEType = UTTypeCopyPreferredTagWithClass(UTI, kUTTagClassMIMEType);
-    CFRelease(UTI);
-    return (__bridge_transfer NSString *)MIMEType;
-}
-
-+ (NSNumber *) getFileSizeFromUrl:(NSURL *)url {
-    NSError *attributesError;
-    NSDictionary *fileAttributes = [[NSFileManager defaultManager] attributesOfItemAtPath:[url path] error:&attributesError];
-    NSNumber *fileSizeNumber = [fileAttributes objectForKey:NSFileSize];
-    long fileSize = [fileSizeNumber longLongValue];
-
-    if (attributesError) {
-        return nil;
-    }
-
-    return [NSNumber numberWithLong:fileSize];
 }
 
 + (UIImage*)resizeImage:(UIImage*)image maxWidth:(float)maxWidth maxHeight:(float)maxHeight
@@ -154,20 +120,6 @@
     UIGraphicsEndImageContext();
 
     return newImage;
-}
-
-+ (PHAsset *)fetchPHAssetOnIOS13:(NSDictionary<NSString *,id> *)info
-{
-    NSURL *referenceURL = [info objectForKey:UIImagePickerControllerReferenceURL];
-
-    if(!referenceURL) {
-      return nil;
-    }
-
-    // We fetch the asset like this to support iOS 10 and lower
-    // see: https://stackoverflow.com/a/52529904/4177049
-    PHFetchResult* fetchResult = [PHAsset fetchAssetsWithALAssetURLs:@[referenceURL] options:nil];
-    return fetchResult.firstObject;
 }
 
 @end
