@@ -16,8 +16,8 @@
     "type": "range",
     "registry": true,
     "raw": "react-native-image-picker@^3.2.1",
-    "name": "react-native-image-pickers",
-    "escapedName": "react-native-image-pickers",
+    "name": "react-native-image-picker",
+    "escapedName": "react-native-image-picker",
     "rawSpec": "^3.2.1",
     "saveSpec": null,
     "fetchSpec": "^3.2.1"
@@ -27,7 +27,7 @@
   ],
   "_resolved": "https://registry.npmjs.org/react-native-image-picker/-/react-native-image-picker-3.8.1.tgz",
   "_shasum": "6e830e9b69c882ad5f1160e10592a84963a7f2c9",
-  "_spec": "react-native-image-pickers@^3.2.1",
+  "_spec": "react-native-image-picker@^3.2.1",
   "_where": "/Users/NgocNam/Documents/App_Moblie/kusuri_mobile_app_new",
   "author": {
     "name": "Johan du Toit",
