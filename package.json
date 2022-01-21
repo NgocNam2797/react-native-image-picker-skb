@@ -16,8 +16,8 @@
     "type": "range",
     "registry": true,
     "raw": "react-native-image-picker@^3.2.1",
-    "name": "react-native-image-picker",
-    "escapedName": "react-native-image-picker",
+    "name": "react-native-image-pickers",
+    "escapedName": "react-native-image-pickers",
     "rawSpec": "^3.2.1",
     "saveSpec": null,
     "fetchSpec": "^3.2.1"
