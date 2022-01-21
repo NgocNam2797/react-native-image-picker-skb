@@ -6,16 +6,16 @@
       "typescript"
     ]
   },
-  "_from": "react-native-image-pickers@^3.2.1",
-  "_id": "react-native-image-pickers@3.8.1",
+  "_from": "react-native-image-picker@^3.2.1",
+  "_id": "react-native-image-picker@3.8.1",
   "_inBundle": false,
   "_integrity": "sha512-Q7qaJ7Zkt8ipIkkF+7UcuRbI0cxaNwsHBcnDLZdlpHnxuMaLhS/xp6v/om/kBYhMg6BeT+NcncynZQoKz7dQqw==",
-  "_location": "/react-native-image-pickers",
+  "_location": "/react-native-image-picker",
   "_phantomChildren": {},
   "_requested": {
     "type": "range",
     "registry": true,
-    "raw": "react-native-image-pickers@^3.2.1",
+    "raw": "react-native-image-picker@^3.2.1",
     "name": "react-native-image-pickers",
     "escapedName": "react-native-image-pickers",
     "rawSpec": "^3.2.1",
@@ -64,7 +64,7 @@
   "homepage": "https://github.com/react-native-image-picker/react-native-image-picker",
   "keywords": [
     "react-native",
-    "react-native-image-pickers",
+    "react-native-image-picker",
     "react",
     "native",
     "image",
@@ -72,7 +72,7 @@
   ],
   "license": "MIT",
   "main": "src/index.ts",
-  "name": "react-native-image-pickers",
+  "name": "react-native-image-picker",
   "peerDependencies": {
     "react": "*",
     "react-native": "*"
