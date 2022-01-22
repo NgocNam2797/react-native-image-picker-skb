@@ -1,6 +1,7 @@
 package com.imagepicker;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
@@ -14,16 +15,22 @@ import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.module.annotations.ReactModule;
 
+import java.io.File;
+import java.util.Collections;
+import java.util.List;
+
 import static com.imagepicker.Utils.*;
 
 @ReactModule(name = ImagePickerModule.NAME)
 public class ImagePickerModule extends ReactContextBaseJavaModule implements ActivityEventListener {
     static final String NAME = "ImagePickerManager";
 
-    static final int REQUEST_LAUNCH_IMAGE_CAPTURE = 13001;
-    static final int REQUEST_LAUNCH_IMAGE_LIBRARY = 13002;
-    static final int REQUEST_LAUNCH_VIDEO_LIBRARY = 13003;
-    static final int REQUEST_LAUNCH_VIDEO_CAPTURE = 13004;
+    // Public to let consuming apps hook into the image picker response
+    public static final int REQUEST_LAUNCH_IMAGE_CAPTURE = 13001;
+    public static final int REQUEST_LAUNCH_VIDEO_CAPTURE = 13002;
+    public static final int REQUEST_LAUNCH_LIBRARY = 13003;
+
+    private Uri fileUri;
 
     final ReactApplicationContext reactContext;
 
@@ -70,29 +77,39 @@ public class ImagePickerModule extends ReactContextBaseJavaModule implements Act
         }
 
         int requestCode;
+        File file;
         Intent cameraIntent;
 
-        if (this.options.pickVideo) {
+        if (this.options.mediaType.equals(mediaTypeVideo)) {
             requestCode = REQUEST_LAUNCH_VIDEO_CAPTURE;
             cameraIntent = new Intent(MediaStore.ACTION_VIDEO_CAPTURE);
             cameraIntent.putExtra(MediaStore.EXTRA_VIDEO_QUALITY, this.options.videoQuality);
             if (this.options.durationLimit > 0) {
                 cameraIntent.putExtra(MediaStore.EXTRA_DURATION_LIMIT, this.options.durationLimit);
             }
-            cameraCaptureURI = createUri(createFile(reactContext, "mp4"), reactContext);
+            file = createFile(reactContext, "mp4");
+            cameraCaptureURI = createUri(file, reactContext);
         } else {
             requestCode = REQUEST_LAUNCH_IMAGE_CAPTURE;
             cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-            cameraCaptureURI = createUri(createFile(reactContext, "jpg"), reactContext);
+            file = createFile(reactContext, "jpg");
+            cameraCaptureURI = createUri(file, reactContext);
         }
+
+        if (this.options.useFrontCamera) {
+            setFrontCamera(cameraIntent);
+        }
+
+        fileUri = Uri.fromFile(file);
         cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, cameraCaptureURI);
+        cameraIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
 
-        if (cameraIntent.resolveActivity(reactContext.getPackageManager()) == null) {
-            callback.invoke(getErrorMap(errOthers, "Activity error"));
-            return;
+        try {
+            currentActivity.startActivityForResult(cameraIntent, requestCode);
+        } catch (ActivityNotFoundException e) {
+            callback.invoke(getErrorMap(errOthers, e.getMessage()));
+            this.callback = null;
         }
-
-        currentActivity.startActivityForResult(cameraIntent, requestCode);
     }
 
     @ReactMethod
@@ -108,47 +125,61 @@ public class ImagePickerModule extends ReactContextBaseJavaModule implements Act
 
         int requestCode;
         Intent libraryIntent;
-        if (this.options.pickVideo) {
-            requestCode = REQUEST_LAUNCH_VIDEO_LIBRARY;
+        requestCode = REQUEST_LAUNCH_LIBRARY;
+
+        boolean isSingleSelect = this.options.selectionLimit == 1;
+        boolean isPhoto = this.options.mediaType.equals(mediaTypePhoto);
+        boolean isVideo = this.options.mediaType.equals(mediaTypeVideo);
+
+        if(isSingleSelect && (isPhoto || isVideo)) {
             libraryIntent = new Intent(Intent.ACTION_PICK);
+        } else {
+            libraryIntent = new Intent(Intent.ACTION_GET_CONTENT);
+            libraryIntent.addCategory(Intent.CATEGORY_OPENABLE);
+        }
+
+        if(!isSingleSelect) {
+            libraryIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        }
+
+        if(isPhoto) {
+            libraryIntent.setType("image/*");
+        } else if (isVideo) {
             libraryIntent.setType("video/*");
         } else {
-            requestCode = REQUEST_LAUNCH_IMAGE_LIBRARY;
-            libraryIntent = new Intent(Intent.ACTION_PICK);
-            libraryIntent.setType("image/*");
+            libraryIntent.setType("*/*");
+            libraryIntent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
         }
 
-        if (libraryIntent.resolveActivity(reactContext.getPackageManager()) == null) {
-            callback.invoke(getErrorMap(errOthers, "Activity error"));
-            return;
+        try {
+            currentActivity.startActivityForResult(Intent.createChooser(libraryIntent, null), requestCode);
+        } catch (ActivityNotFoundException e) {
+            callback.invoke(getErrorMap(errOthers, e.getMessage()));
+            this.callback = null;
         }
-
-        currentActivity.startActivityForResult(Intent.createChooser(libraryIntent, null), requestCode);
     }
 
-    void onImageObtained(Uri uri) {
-        if (uri == null) {
-            callback.invoke(getErrorMap(errOthers, "Uri error"));
-            return;
+    void onAssetsObtained(List<Uri> fileUris) {
+        try {
+            callback.invoke(getResponseMap(fileUris, options, reactContext));
+        } catch (RuntimeException exception) {
+            callback.invoke(getErrorMap(errOthers, exception.getMessage()));
+        } finally {
+            callback = null;
         }
-        Uri newUri = resizeImage(uri, reactContext, options);
-        callback.invoke(getResponseMap(newUri, options, reactContext));
-    }
-
-    void onVideoObtained(Uri uri) {
-        callback.invoke(getVideoResponseMap(uri, options, reactContext));
     }
 
     @Override
     public void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
 
-        if (!isValidRequestCode(requestCode)) {
+        // onActivityResult is called even when ActivityNotFoundException occurs
+        if (!isValidRequestCode(requestCode) || (this.callback == null)) {
             return;
         }
 
         if (resultCode != Activity.RESULT_OK) {
             if (requestCode == REQUEST_LAUNCH_IMAGE_CAPTURE) {
-                deleteFile(cameraCaptureURI, reactContext);
+                deleteFile(fileUri);
             }
             callback.invoke(getCancelMap());
             return;
@@ -159,22 +190,20 @@ public class ImagePickerModule extends ReactContextBaseJavaModule implements Act
                 if (options.saveToPhotos) {
                     saveToPublicDirectory(cameraCaptureURI, reactContext, "photo");
                 }
-                onImageObtained(cameraCaptureURI);
+
+                onAssetsObtained(Collections.singletonList(fileUri));
                 break;
 
-            case REQUEST_LAUNCH_IMAGE_LIBRARY:
-                onImageObtained(getAppSpecificStorageUri(data.getData(), reactContext));
-                break;
-
-            case REQUEST_LAUNCH_VIDEO_LIBRARY:
-                onVideoObtained(data.getData());
+            case REQUEST_LAUNCH_LIBRARY:
+                onAssetsObtained(collectUrisFromData(data));
                 break;
 
             case REQUEST_LAUNCH_VIDEO_CAPTURE:
                 if (options.saveToPhotos) {
                     saveToPublicDirectory(cameraCaptureURI, reactContext, "video");
                 }
-                onVideoObtained(cameraCaptureURI);
+
+                onAssetsObtained(Collections.singletonList(fileUri));
                 break;
         }
     }
